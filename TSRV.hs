@@ -167,55 +167,62 @@ run c p "synonymCheck" args = fmap (B.pack . show) $ synonymCheck c e1 e2
     where (e1, e2) = (\(x, y) -> (Aux.parseToBS x, Aux.parseToBS y)) $ $(THAux.recBreak 2) args '#'
 run c p "clustering" args = do fmap (B.pack . show) $ clustering c e
     where e = Aux.parseToBSL $ $(THAux.recBreak 1) args '#'
-
-
-
-
-
--- sach trying things right now
-run c p "dClustering" args = do fmap (B.pack . show) $ clustering c e
+run c p "thresholdClustering" args = do fmap (B.pack . show) $ thresholdClustering c p e
     where e = Aux.parseToBSL $ $(THAux.recBreak 1) args '#'
+run _ _ _ _ = return $ "Invalid method."
+
+-- Threshold Clustering
 
 -- create similarity matrix
-simatrix :: [Entity] -> [[Double]]
-simatrix el = [[distance c p el e2 | e1 <- el] | e2 <- el]
+-- this version copies over fold so you don't have to do distance twice
+simMatrix :: DBC -> Property -> [Entity] -> [[Double]]
+simMatrix c p el = copyOver [[ if j > i then distance c p (el !! i) (el !! j) else 0 | j <- eindex] | i <- eindex]
+    where   eindex = [0..length el - 1]
+            copyOver sm = [[ if j < i then sm !! j !! i else sm !! i !! j | j <- eindex] | i <- eindex]
 
-simatrix el = copyOver [[ if j > i then distance c p (el !! i) (el !! j) else 0 | j <- eindex] | i <- eindex]
-    where eindex = [0..length el - 1]
--- copy over fold so you don't have to do distance twice
-copyOver :: [[Double]] -> [[Double]]
-copyOver sm = [[ if j < i then sm !! j !! i else sm !! i !! j | j <- eindex | i <- eindex]
+-- find subtree from a starting point
+-- frontier + list of nodes to go to
+searchTree :: [Int] -> Double -> [[Double]] -> [Int] -> [[Int]] -> [[Int]]
+searchTree (s:visit) d sm found acc = 
+    let eindex = [0..length sm - 1]
+        -- so has to be connected and not found already, or already a part of visit
+        nvisit = L.filter (\x -> (d < sm !! s !! x && x `notElem` found) || x `elem` visit) eindex
+    in  if length nvisit == 0 then 
+            if compare1d2d (s:found) acc then acc     -- return condition
+            else (s:found):acc                        -- add this result onto acc
+        else searchTree nvisit d sm (s:found) acc     -- go to next node
+
+-- find all subtrees
+allConnected :: Double -> [[Double]] -> [[Int]]
+allConnected d sm = L.foldl (\acc x -> searchTree [x] d sm [] acc) [] eindex
     where eindex = [0..length sm - 1]
 
--- search all d values
-searchTree visit d sm found = 
+-- search tree for each d value
+-- toss away clusterings that are the same
+thresholdClustering :: DBC -> Property -> [Entity] -> [[[Int]]]
+thresholdClustering c p el = 
+    let diff acc d = 
+        let clusters = allConnected d (simMatrix c p el)
+        in  if compare2d2d (head acc) clusters then acc -- discard if same cluster
+                else clusters:acc -- we are adding on to the head here
+    in  init $ L.foldl diff [[]] [0,2..10]
 
 
-searchTree :: Int -> Double -> [[Double] -> [Int] -> [Int]
+-- should give false if they are not equal, true if equal
+compare1d2d :: (Eq a, Show a) => [a] -> [[a]] -> Bool
+compare1d2d _ [] = False
+compare1d2d x (y:ys) = L.null (x L.\\ y) || compare1d2d x ys
 
-searchTree s d sm found = 
-    let visit = filter (\e d > sm !! s !! e && notElem e found) eindex -- nodes to go to
-
-    in  if length visit == 0 then found else
-        if searchTree (head visit) d sm (s:found)
-
-    where eindex = [0..length sm - 1]
-
-
-dClustering :: Double -> [[Double]] -> [Int] -> [[Int]]
-dClustering d sm = [[   ] | sm <- sm, ]
-
-
-
-
--- end trying things and back to working things
+compare2d2d :: (Ord a, Eq a, Show a) => [[a]] -> [[a]] -> Bool
+compare2d2d xs ys = set2d xs == set2d ys
+    where set2d list = S.fromList [S.fromList l | l <- list]
 
 
 
 
 
 
-run _ _ _ _ = return $ "Invalid method."
+
 
 parseDouble :: Double -> B.ByteString
 parseDouble = toFixed 8

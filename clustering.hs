@@ -10,21 +10,16 @@ type DBC = Int
 
 {-
 simMatrix c p el = [[distance c p e1 e2 | e1 <- el] | e2 <- el]
+simMatrix c p el = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 10.0, 0.0, 0.0, 0.0], [0.0, 10.0, 0.0, 10.0, 0.0, 10.0], [0.0, 0.0, 10.0, 0.0, 5.0, 0.0], [0.0, 0.0, 0.0, 5.0, 0.0, 0.0],[0.0, 0.0, 10.0, 0.0, 0.0, 0.0]]
+copyOver :: [[Double]] -> [[Double]]
+    where   eindex = [0..length sm - 1]
 -}
 -- create similarity matrix
 -- this version copies over fold so you don't have to do distance twice
--- it's kind of ugly
 simMatrix :: DBC -> Property -> [Entity] -> [[Double]]
-{-
 simMatrix c p el = copyOver [[ if j > i then distance c p (el !! i) (el !! j) else 0 | j <- eindex] | i <- eindex]
     where   eindex = [0..length el - 1]
--}
-simMatrix c p el = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 10.0, 0.0, 0.0, 0.0], [0.0, 10.0, 0.0, 10.0, 0.0, 10.0], [0.0, 0.0, 10.0, 0.0, 5.0, 0.0], [0.0, 0.0, 0.0, 5.0, 0.0, 0.0],[0.0, 0.0, 10.0, 0.0, 0.0, 0.0]]
-
-copyOver :: [[Double]] -> [[Double]]
-copyOver sm = [[ if j < i then sm !! j !! i else sm !! i !! j | j <- eindex] | i <- eindex]
-    where   eindex = [0..length sm - 1]
-
+            copyOver sm = [[ if j < i then sm !! j !! i else sm !! i !! j | j <- eindex] | i <- eindex]
 
 -- find subtree from a starting point
 -- frontier + list of nodes to go to
