@@ -154,17 +154,15 @@ class Tetris():
         # lines to remove next tick
         self.toremove = []
 
-        
-
     def new_piece(self):
         self.rot = 0
         self.fy = 0
         self.fx = 5 - 2
         # new falling piece and only the pairs you have to check
         self.falling_piece = Blocks.COLORS.keys()[random.randint(0,6)]
-        self.check_falling = [(y, x) for x in range(4) for y in range(4)]
-            # filter(lambda t: self.falling_piece[t[0]][t[1]] == 1, 
-                # [(y, x) for x in range(4) for y in range(4)])
+        self.check_falling = \
+            filter(lambda t: self.falling_piece[self.rot % 4][t[0]][t[1]] == 1, 
+                [(y, x) for x in range(4) for y in range(4)])
 
     def calc_shadow(self):
         old_fy = self.fy
