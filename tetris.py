@@ -141,13 +141,14 @@ class Blocks():
     
 
 class Tetris():
+    '''all the logic for a tetris game
+    '''
     def __init__(self, box):
         self.box = box
         self.grid       = [[0 for _ in range(10)] for _ in range(20)]
         self.colors     = [[8 for _ in range(10)] for _ in range(20)]
         # your actual falling piece
         self.falling_piece = Blocks.L_BLOCK
-        self.check_falling = None
         self.rot, self.fy, self.fx = (0, 0, 0)
         # shodaw of your piece
         self.sy = 0
@@ -155,24 +156,30 @@ class Tetris():
         self.toremove = []
 
     def new_piece(self):
+        '''chooses a random new piece for the top'''
         self.rot = 0
         self.fy = 0
         self.fx = 5 - 2
         # new falling piece and only the pairs you have to check
         self.falling_piece = Blocks.COLORS.keys()[random.randint(0,6)]
-        self.check_falling = \
-            filter(lambda t: self.falling_piece[self.rot % 4][t[0]][t[1]] == 1, 
-                [(y, x) for x in range(4) for y in range(4)])
+            
 
     def calc_shadow(self):
+        '''calculates where the lookahead piece should go'''
         old_fy = self.fy
         while self.check_down():
             self.fy += 1
         self.sy = self.fy
         self.fy = old_fy
 
+    def check_falling_set(self):
+        '''creates a set of y,x tuples that you need to check for this piece'''
+        return filter(lambda t: self.falling_piece[self.rot % 4][t[0]][t[1]] == 1, 
+                [(y, x) for x in range(4) for y in range(4)])
+
     def check_rot(self):
-        for y, x in self.check_falling:
+        '''checks all xy tuples, can't use falling set bc rot is different'''
+        for y, x in [(y, x) for x in range(4) for y in range(4)]:
             ay = self.fy + y
             ax = self.fx + x
             # not inside box OR collision
@@ -186,13 +193,12 @@ class Tetris():
         return True
 
     def check_side(self, side):
-        for y, x in self.check_falling:
+        '''check falling set to see if we can move this piece left or right'''
+        for y, x in self.check_falling_set():
             ay = self.fy + y
             ax = self.fx + x + side
             # not inside box OR collision
-            if (self.falling_piece[self.rot % 4][y][x] == 1
-                and 
-                ((ax < 0 or ax >= 10) or 
+            if (((ax < 0 or ax >= 10) or 
                 (ay >= 0 and ay < 20 and
                  ax >= 0 and ax < 10
                  and self.grid[ay][ax] == 1))):
@@ -200,12 +206,11 @@ class Tetris():
         return True
 
     def check_down(self):
-        for y, x in self.check_falling:
+        '''can we move this piece down?'''
+        for y, x in self.check_falling_set():
             ay = self.fy + y + 1
             ax = self.fx + x
-            if (self.falling_piece[self.rot % 4][y][x] == 1
-                and 
-                (ay >= 20 or 
+            if ((ay >= 20 or 
                 (ay >= 0 and ay < 20 and
                  ax >= 0 and ax < 10
                  and self.grid[ay][ax] == 1))):
@@ -213,14 +218,14 @@ class Tetris():
         return True
 
     def commit_piece(self):
-        for y, x in self.check_falling:
+        '''commit piece to grid, set lines to remove'''
+        for y, x in self.check_falling_set():
             ay = self.fy + y
             ax = self.fx + x
             if (ay >= 0 and ay < 20 and
                 ax >= 0 and ax < 10):
-                if self.falling_piece[self.rot % 4][y][x]:
-                    self.grid[ay][ax] = self.falling_piece[self.rot % 4][y][x]
-                    self.colors[ay][ax] = Blocks.COLORS[self.falling_piece]
+                self.grid[ay][ax] = self.falling_piece[self.rot % 4][y][x]
+                self.colors[ay][ax] = Blocks.COLORS[self.falling_piece]
         for y in range(20):
             line = True
             for x in range(10):
@@ -232,6 +237,7 @@ class Tetris():
                 self.colors[y] = [1] * 10
     
     def remove_lines(self):
+        '''remove the lines from grid you set last tick'''
         for y in self.toremove:
             self.colors.remove(self.colors[y])
             self.colors.insert(0, [8] * 10)
@@ -241,6 +247,7 @@ class Tetris():
 
     
     def draw(self):
+        '''draw all grid, falling piece, and shadow'''
         self.draw_grid(self.box)
         self.draw_shadow(self.box)
         self.draw_falling_piece(self.box)
@@ -254,23 +261,21 @@ class Tetris():
                 box.addstr(1 + y, 1 + x*2, '  ', curses.color_pair(paint))
 
     def draw_falling_piece(self, box):
-        for y, x in self.check_falling:
+        for y, x in self.check_falling_set():
             ay = self.fy + y
             ax = self.fx + x
             if (ay >= 0 and ay < 20 and
                 ax >= 0 and ax < 10):
-                if self.falling_piece[self.rot % 4][y][x] == 1:
-                    box.addstr(1 + ay, 1 + ax*2, '  ', 
-                        curses.color_pair(Blocks.COLORS[self.falling_piece]))
+                box.addstr(1 + ay, 1 + ax*2, '  ', 
+                    curses.color_pair(Blocks.COLORS[self.falling_piece]))
 
     def draw_shadow(self, box):
-        for y, x in self.check_falling:
+        for y, x in self.check_falling_set():
             ay = self.sy + y
             ax = self.fx + x
             if (ay >= 0 and ay < 20 and
                 ax >= 0 and ax < 10):
-                if self.falling_piece[self.rot % 4][y][x] == 1:
-                    box.addstr(1 + ay, 1 + ax*2, '[]', curses.color_pair(8))
+                box.addstr(1 + ay, 1 + ax*2, '[]', curses.color_pair(8))
 
 
 
