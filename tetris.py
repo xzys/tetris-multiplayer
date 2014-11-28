@@ -1,3 +1,4 @@
+from threading import Thread, Lock
 import curses
 import time
 import random
@@ -166,30 +167,13 @@ class Blocks():
     }
     REVIDS = {v : k for k, v in IDS.items()}
 
-def set_normal_colors():
-    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
-    curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)
-    curses.init_pair(3, curses.COLOR_BLUE, curses.COLOR_BLACK)
-    curses.init_pair(4, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-    curses.init_pair(5, curses.COLOR_CYAN, curses.COLOR_BLACK)
-    curses.init_pair(6, curses.COLOR_GREEN, curses.COLOR_BLACK)
-    curses.init_pair(7, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-    curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_WHITE)
-def set_solid_colors():
-    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
-    curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_RED)
-    curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_BLUE)
-    curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA)
-    curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_CYAN)
-    curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_GREEN)
-    curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_YELLOW)
-    curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_BLACK)
-
 class Tetris():
     '''all the logic for a tetris game
     '''
-    def __init__(self, box, stdscr):
-        self.playing = True
+    def __init__(self, box, stdscr, remote):
+        self.playing = False
+        self.paused = False
+        self.remote = remote
         # graphics
         self.box = box
         self.stdscr = stdscr
@@ -203,6 +187,15 @@ class Tetris():
         # lines to remove next tick
         self.toremove = []
         self.lines = 0
+        # network stuff
+        self.lock = Lock()
+
+    def ready(self, name):
+        self.playing = True
+        self.stdscr.addstr(rely(0.5) + 11, relx(0.5) + self.remote*22 - 3, 
+            name, curses.color_pair(8))
+        
+
 
     def new_piece(self):
         '''chooses a random new piece for the top'''
@@ -313,12 +306,17 @@ class Tetris():
     def draw(self):
         '''draw all grid, falling piece, and shadow'''
         self.draw_grid(self.box)
-        self.draw_shadow(self.box)
+        if not self.playing: self.box.addstr(11, 7, "WAITING", curses.color_pair(8))
+        if self.remote == 0: self.draw_shadow(self.box)
         self.draw_falling_piece(self.box)
         self.draw_next_piece(self.stdscr)
         self.draw_holding_piece(self.stdscr)
-        self.stdscr.addstr(rely(0.5), relx(0.5) + 12,
-            "lines: %i" % self.lines, curses.color_pair(8))
+        if self.paused:
+            self.stdscr.addstr(rely(0.5), relx(0.5) + 12 + self.remote*22,
+                    "paused", curses.color_pair(8))
+        else: 
+            self.stdscr.addstr(rely(0.5), relx(0.5) + 12 + self.remote*22,
+                "lines: %i" % self.lines, curses.color_pair(8))
         self.box.refresh()
 
     def draw_grid(self, box):
@@ -330,24 +328,26 @@ class Tetris():
                                       if self.grid[y][x] == 1 else 8))
 
     def draw_falling_piece(self, box):
-        for y, x in self.check_falling_set():
-            ay = self.fy + y
-            ax = self.fx + x
-            if (0 <= ay < 20 and
-                0 <= ax < 10):
-                box.addstr(1 + ay, 1 + ax*2, '  ', 
-                    curses.color_pair(Blocks.COLORS[self.falling_piece]))
+        if self.falling_piece:
+            for y, x in self.check_falling_set():
+                ay = self.fy + y
+                ax = self.fx + x
+                if (0 <= ay < 20 and
+                    0 <= ax < 10):
+                    box.addstr(1 + ay, 1 + ax*2, '  ', 
+                        curses.color_pair(Blocks.COLORS[self.falling_piece]))
 
     def draw_next_piece(self, stdscr):
-        for y, x in [(y, x) for x in range(4) for y in range(4)]:
-            stdscr.addstr(y + rely(0.5) - 10, x*2 + relx(0.5) + 12, '  ', 
-                curses.color_pair(Blocks.COLORS[self.next_piece] 
-                                  if self.next_piece[0][y][x] == 1 else 8))
+        if self.next_piece:
+            for y, x in [(y, x) for x in range(4) for y in range(4)]:
+                stdscr.addstr(y + rely(0.5) - 10, x*2 + relx(0.5) + 12 + self.remote*22, '  ', 
+                    curses.color_pair(Blocks.COLORS[self.next_piece] 
+                                      if self.next_piece[0][y][x] == 1 else 8))
 
     def draw_holding_piece(self, stdscr):
         if self.holding_piece:
             for y, x in [(y, x) for x in range(4) for y in range(4)]:
-                stdscr.addstr(y + rely(0.5) - 5, x*2 + relx(0.5) + 12, '  ', 
+                stdscr.addstr(y + rely(0.5) - 5, x*2 + relx(0.5) + 12 + self.remote*22, '  ', 
                     curses.color_pair(Blocks.COLORS[self.holding_piece] 
                                       if self.holding_piece[0][y][x] == 1 else 8))
 
@@ -362,24 +362,156 @@ class Tetris():
     # /////////////////////// NETWORKING  ////////////////////////////////
 
     def serialize(self):
+        fullgrid = [str(self.grid[i/10][i%10]) for i in xrange(200)]
+        fullcolors = [str(self.colors[i/10][i%10]) for i in xrange(200)]
+        for y, x in self.check_falling_set():
+            fullgrid[10 * (self.fy + y) + (self.fx + x)] = str(1)
+            fullcolors[10 * (self.fy + y) + (self.fx + x)] = str(Blocks.COLORS[self.falling_piece])
+
         return ':'.join((str(self.lines),
-                         str(Blocks.IDS(self.next_piece)),
-                         str(Blocks.IDS(self.holding_piece)),
-                         [str(self.grid[i/10][i%10]) for i in xrange(200)],
-                         [str(self.colors[i/10][i%10]) for i in xrange(200)]))
+                         str(Blocks.IDS.get(self.next_piece, "n")),
+                         str(Blocks.IDS.get(self.holding_piece, "n")),
+                         ''.join(fullgrid),
+                         ''.join(fullcolors))) + '/'
 
     def deserialize(self, msg):
-        data = msg.split(':')
-        self.lines          = int(msg[0])
-        self.next_piece     = Blocks.REVIDS[int(msg[1])]
-        self.holding_piece  = Blocks.REVIDS[int(msg[2])]
+        self.lines          = int(msg[0]) if int(msg[0]) < 1000 else self.lines
+        self.next_piece     = None if msg[1] == 'n' else Blocks.REVIDS[int(msg[1])]
+        self.holding_piece  = None if msg[2] == 'n' else Blocks.REVIDS[int(msg[2])]
         self.grid           = [[int(msg[3][y*10 + x]) for x in xrange(10)] for y in xrange(20)]
         self.colors         = [[int(msg[4][y*10 + x]) for x in xrange(10)] for y in xrange(20)]
 
 
+class NetworkConnection(Thread):
+    '''run the network connection on another thread'''
+    def __init__(self, other, socket):
+        Thread.__init__(self)
+        self.other = other
+        self.socket = socket
+
+    def run(self):
+        # wait for start signal
+        while 1:
+            msg = self.socket.recv(500)
+            if msg.startswith("ready"):
+                with self.other.lock:
+                    self.other.ready(msg.split('/')[0].split(':')[1])
+                break
+
+        while 1:
+            msg = self.socket.recv(500)
+            # update game with data
+            with self.other.lock:
+                try:
+                    self.other.deserialize(msg.split('/')[0].split(':'))
+                except:
+                    pass
+                
+            time.sleep(0.1)
+
+
 
     
+def loop(stdscr, socket):
+    stdscr.nodelay(1)
+
+
+    other = None
+    if socket:
+        box = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11 - 22)
+        game = Tetris(box, stdscr, -1)
+        box2 = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11 + 22)
+        other = Tetris(box2, stdscr, 1)
+        thread = NetworkConnection(other, socket)
+        thread.daemon = True
+        thread.start()
+    else:
+        # normal single player
+        box = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11)
+        game = Tetris(box, stdscr, 0)
+        
     
+    # wait until other person is ready as well
+    ready = False
+    while not ready:
+        key = stdscr.getch()
+        if key == ord(' '):
+            socket.send("ready:%s/" % name)
+            game.ready(name)
+        
+        with other.lock:
+            game.draw()
+            other.draw()
+            if game.playing and other.playing:
+                ready = True
+        time.sleep(0.02)
+
+    game.new_piece()
+    last_update = time.time()
+    while game.playing:
+        dirty = False
+        drop = False
+        fast = False
+        wait = 0.2
+        
+        key = stdscr.getch()
+        if key == ord('q'):
+            return
+        elif key == ord('p'):
+            if game.paused:
+                game.paused = False
+            else:
+                game.paused = True
+
+        if not game.paused:
+            if key == ord('c'):
+                game.hold_piece()
+            elif key == ord(' '):
+                game.fy = game.sy
+                dirty = True
+                drop = True
+            elif key == curses.KEY_DOWN:
+                fast = True
+            elif key == curses.KEY_LEFT and game.check_side(-1):
+                game.fx -= 1
+                dirty = True
+            elif key == curses.KEY_RIGHT and game.check_side(1): 
+                game.fx += 1
+                dirty = True
+            elif key == curses.KEY_UP and game.check_rot(): 
+                game.rot += 1
+                dirty = True
+
+            if drop or time.time() - last_update > (0.05 if fast else 0.2):
+                last_update = time.time()
+                game.remove_lines()
+                if not game.check_down():
+                    game.commit_piece()
+                    game.new_piece()
+                game.fy += 1
+                dirty = True
+
+            if dirty: game.calc_shadow()
+
+        if socket:
+            if dirty:
+                socket.send(game.serialize())
+            with other.lock:
+                other.draw()
+                game.draw()
+        else:
+            game.draw()
+
+
+        time.sleep(0.02)
+
+
+
+
+
+
+
+
 
 
 
@@ -427,127 +559,98 @@ def intro(stdscr):
     if key == ord('m'): multiplayer = True
     stdscr.addstr(y+1, x + 4, "GAMEMODE:".ljust(20) + 
         ("MULTIPLAYER" if multiplayer else "SINGLE PLAYER"), curses.color_pair(1))
-
+    
     if multiplayer:
-        try:    stdscr.addstr(y+2, x + 4, "PUBLIC IP:".ljust(20) + "%s:%i" % get_public_ip(), curses.color_pair(1))
-        except: stdscr.addstr(y+2, x + 4, "PUBLIC IP:".ljust(20) + "ERR: Not Found", curses.color_pair(1))
-        try:    stdscr.addstr(y+3, x + 4, "LOCAL IP:".ljust(20) + "%s:%i" % get_local_ip(), curses.color_pair(1))
-        except: stdscr.addstr(y+3, x + 4, "LOCAL IP:".ljust(20) + "ERR: Not Found", curses.color_pair(1))
-        
-        # create socket and listen
-        # taken from sSMTP server mp3
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
-        if addr:
-            # client
-            stdscr.addstr(y+7, x + 4, "(x) any key to connect to %s:%i".ljust(60) % (addr, port), curses.color_pair(1))
-            stdscr.getch()
-            stdscr.addstr(y+6, x + 4, "Connecting to %s:%i" % (addr, port), curses.color_pair(1))
-            stdscr.addstr(y+7, x + 4, "(^c) to quit".ljust(60), curses.color_pair(1))
-            stdscr.refresh()
-            try:
-                s.connect((addr, port))
-            except:
-                stdscr.addstr(y+6, x + 4, "Connection Failed.".ljust(60), curses.color_pair(1))
-                stdscr.refresh()
-                time.sleep(3)
-                return
-            
-        else:
-            # server
-            stdscr.addstr(y+7, x + 4, "(x) any key to start server".ljust(60), curses.color_pair(1))
-            stdscr.getch()
-            stdscr.addstr(y+6, x + 4, "Server waiting for connection.", curses.color_pair(1))
-            stdscr.addstr(y+7, x + 4, "(^c) to quit".ljust(60), curses.color_pair(1))
-            stdscr.refresh()
-            try:
-                s.bind(('', port))
-                s.listen(5)
-                s.accept();
-                s.recv()
-            except:
-                stdscr.addstr(y+6, x + 4, "Connection Failed.".ljust(60), curses.color_pair(1))
-                stdscr.refresh()
-                time.sleep(3)
-                return
-        
-        stdscr.addstr(y+6, x + 4, "Connected!".ljust(40), curses.color_pair(1))
+        play_multi(stdscr)
     else:
-        pass
-        
-    stdscr.addstr(y+7, x + 4, "(q) to quit / any key to START".ljust(60), curses.color_pair(1))
-    key = stdscr.getch()
-    if key == ord('q'):
-        return
-
-    stdscr.refresh()
-    stdscr.clear()
-    set_solid_colors()
-    loop(stdscr)
-
-
-def loop(stdscr):
-    stdscr.nodelay(1)
-    key = ''
-    box = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11)
-    game = Tetris(box, stdscr)
-    game.new_piece()
-    last_update = time.time()
-
-    paused = False
-    while game.playing:
-        dirty = False
-        drop = False
-        fast = False
-        wait = 0.2
+        stdscr.addstr(y+7, x + 4, "(q) to quit / any key to START".ljust(60), curses.color_pair(1))
         key = stdscr.getch()
-        
         if key == ord('q'):
             return
-        elif key == ord('p'):
-            if paused:
-                paused = False
-            else:
-                paused = True
-                stdscr.addstr(rely(0.5), relx(0.5) + 12,
-                    "paused", curses.color_pair(8))
-                stdscr.refresh()
         
-        if not paused:
-            if key == ord('c'):
-                game.hold_piece()
-            elif key == ord(' '):
-                game.fy = game.sy
-                dirty = True
-                drop = True
-            elif key == curses.KEY_DOWN:
-                fast = True
-            elif key == curses.KEY_LEFT and game.check_side(-1):
-                game.fx -= 1
-                dirty = True
-            elif key == curses.KEY_RIGHT and game.check_side(1): 
-                game.fx += 1
-                dirty = True
-            elif key == curses.KEY_UP and game.check_rot(): 
-                game.rot += 1
-                dirty = True
+        stdscr.refresh()
+        stdscr.clear()
+        set_solid_colors()
+        loop(stdscr, None)
 
-            if drop or time.time() - last_update > (0.05 if fast else 0.2):
-                last_update = time.time()
-                game.remove_lines()
-                if not game.check_down():
-                    game.commit_piece()
-                    game.new_piece()
-                game.fy += 1
-                dirty = True
+def play_multi(stdscr):
+    x, y = relx(.5) - 20, rely(.5) - 6
+    try:    stdscr.addstr(y+2, x + 4, "PUBLIC IP:".ljust(20) + "%s:%i" % get_public_ip(), curses.color_pair(1))
+    except: stdscr.addstr(y+2, x + 4, "PUBLIC IP:".ljust(20) + "ERR: Not Found", curses.color_pair(1))
+    try:    stdscr.addstr(y+3, x + 4, "LOCAL IP:".ljust(20) + "%s:%i" % get_local_ip(), curses.color_pair(1))
+    except: stdscr.addstr(y+3, x + 4, "LOCAL IP:".ljust(20) + "ERR: Not Found", curses.color_pair(1))
+    
+    # create socket and listen
+    # taken from sSMTP server mp3
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    if addr:
+        # client
+        stdscr.addstr(y+7, x + 4, "(x) any key to connect to %s:%i".ljust(60) % (addr, port), curses.color_pair(1))
+        stdscr.getch()
+        stdscr.addstr(y+6, x + 4, "Connecting to %s:%i" % (addr, port), curses.color_pair(1))
+        stdscr.addstr(y+7, x + 4, "(^c) to quit".ljust(60), curses.color_pair(1))
+        stdscr.refresh()
+        try:
+            s.connect((addr, port))
+        except:
+            stdscr.addstr(y+6, x + 4, "Connection Failed.".ljust(60), curses.color_pair(1))
+            stdscr.refresh()
+            time.sleep(3)
+            return
+        
+        stdscr.addstr(y+6, x + 4, "Connected!".ljust(40), curses.color_pair(1))
+        stdscr.refresh()
+        stdscr.clear()
+        set_solid_colors()
+        loop(stdscr, s)
+        
+    else:
+        # server
+        stdscr.addstr(y+7, x + 4, "(x) any key to start server".ljust(60), curses.color_pair(1))
+        stdscr.getch()
+        stdscr.addstr(y+6, x + 4, "Server waiting for connection.", curses.color_pair(1))
+        stdscr.addstr(y+7, x + 4, "(^c) to quit".ljust(60), curses.color_pair(1))
+        stdscr.refresh()
+        try:
+            s.bind(('', port))
+            s.listen(5)
+            (clientsocket, address) = s.accept()
+        except:
+            stdscr.addstr(y+6, x + 4, "Connection Failed.".ljust(60), curses.color_pair(1))
+            stdscr.refresh()
+            time.sleep(3)
+            return
+        
+        stdscr.addstr(y+6, x + 4, "Connected!".ljust(40), curses.color_pair(1))
+        stdscr.refresh()
+        stdscr.clear()
+        set_solid_colors()
+        loop(stdscr, clientsocket)
+    
+    # for server you need to send another socket
 
-            if dirty: game.calc_shadow()
+def set_normal_colors():
+    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)
+    curses.init_pair(3, curses.COLOR_BLUE, curses.COLOR_BLACK)
+    curses.init_pair(4, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+    curses.init_pair(5, curses.COLOR_CYAN, curses.COLOR_BLACK)
+    curses.init_pair(6, curses.COLOR_GREEN, curses.COLOR_BLACK)
+    curses.init_pair(7, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_WHITE)
+def set_solid_colors():
+    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
+    curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_RED)
+    curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_BLUE)
+    curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA)
+    curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_CYAN)
+    curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_GREEN)
+    curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_YELLOW)
+    curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_BLACK)
 
-            game.draw()
-            game.draw_holding_piece(stdscr)
-
-        time.sleep(0.01)
+    
 
 def cli(stdscr):
     # curses.use_default_colors()
