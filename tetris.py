@@ -194,8 +194,6 @@ class Tetris():
         self.playing = True
         self.stdscr.addstr(rely(0.5) + 11, relx(0.5) + self.remote*22 - 3, 
             name, curses.color_pair(8))
-        
-
 
     def new_piece(self):
         '''chooses a random new piece for the top'''
@@ -414,8 +412,7 @@ class NetworkConnection(Thread):
     
 def loop(stdscr, socket):
     stdscr.nodelay(1)
-
-
+    
     other = None
     if socket:
         box = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11 - 22)
@@ -433,18 +430,21 @@ def loop(stdscr, socket):
     
     # wait until other person is ready as well
     ready = False
-    while not ready:
-        key = stdscr.getch()
-        if key == ord(' '):
-            socket.send("ready:%s/" % name)
-            game.ready(name)
-        
-        with other.lock:
-            game.draw()
-            other.draw()
-            if game.playing and other.playing:
-                ready = True
-        time.sleep(0.02)
+    if socket:
+        while not ready:
+            key = stdscr.getch()
+            if key == ord(' '):
+                socket.send("ready:%s/" % name)
+                game.ready(name)
+            
+            with other.lock:
+                game.draw()
+                other.draw()
+                if game.playing and other.playing:
+                    ready = True
+            time.sleep(0.02)
+    else:
+        game.ready(name)
 
     game.new_piece()
     last_update = time.time()
