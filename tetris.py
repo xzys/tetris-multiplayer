@@ -1,3 +1,4 @@
+#!/usr/bin/python
 from threading import Thread, Lock
 import curses
 import time

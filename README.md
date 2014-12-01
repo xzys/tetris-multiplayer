@@ -1,4 +1,21 @@
 tetris-multiplayer
 ==================
 
-a simgle/multiplayer tetris game that runs on your terminal (Mac/Linux)
+a single/multiplayer tetris game that runs on your terminal (Mac/Linux). [A more detailed write up.](http://sachinrudr.github.io/scribble/project/2014/11/26/tetris/)
+
+![single player](tetris.gif)
+![multiplayer](tetrism.gif)
+
+### Requirements
+
+1. python
+2. curses (Mac/*nix b/c windows doesn't have this unfortunately)
+
+### Play
+
+1. get tetris.py and make it executable
+2. run it with options (optional)
+
+`tetris.py $NAME` for single player, or multiplayer SERVER
+`tetris.py $NAME $HOSTNAME $PORT` for multiplayer CLIENT. use HOSTNAME and PORT given by SERVER
+
