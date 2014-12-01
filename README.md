@@ -3,7 +3,10 @@ tetris-multiplayer
 
 a single/multiplayer tetris game that runs on your terminal (Mac/Linux). [A more detailed write up.](http://sachinrudr.github.io/scribble/project/2014/11/26/tetris/)
 
+#### Single Player
 ![single player](tetris.gif)
+
+#### Multiplayer
 ![multiplayer](tetrism.gif)
 
 ### Requirements
