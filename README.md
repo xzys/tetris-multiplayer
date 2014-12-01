@@ -19,6 +19,6 @@ a single/multiplayer tetris game that runs on your terminal (Mac/Linux). [A more
 1. get tetris.py and make it executable
 2. run it with options (optional)
 
-`tetris.py $NAME` for single player, or multiplayer SERVER
+`tetris.py $NAME` for single player, or multiplayer SERVER    
 `tetris.py $NAME $HOSTNAME $PORT` for multiplayer CLIENT. use HOSTNAME and PORT given by SERVER
 
