@@ -221,7 +221,7 @@ class Tetris():
     def check_falling_set(self):
         '''creates a set of y,x tuples that you need to check for this piece'''
         return filter(lambda t: self.falling_piece[self.rot % 4][t[0]][t[1]] == 1, 
-                [(y, x) for x in range(4) for y in range(4)])
+                [(y, x) for x in range(4) for y in range(4)]) if self.falling_piece else []
 
     def check_rot(self):
         '''checks all xy tuples, can't use falling set bc rot is different'''
@@ -306,7 +306,7 @@ class Tetris():
         '''draw all grid, falling piece, and shadow'''
         self.draw_grid(self.box)
         if not self.playing: self.box.addstr(11, 7, "WAITING", curses.color_pair(8))
-        if self.remote == 0: self.draw_shadow(self.box)
+        if self.playing and self.remote != 1: self.draw_shadow(self.box)
         self.draw_falling_piece(self.box)
         self.draw_next_piece(self.stdscr)
         self.draw_holding_piece(self.stdscr)
@@ -483,7 +483,7 @@ def loop(stdscr, socket):
                 game.rot += 1
                 dirty = True
 
-            if drop or time.time() - last_update > (0.05 if fast else 0.2):
+            if drop or time.time() - last_update > (0.05 if fast else wait):
                 last_update = time.time()
                 game.remove_lines()
                 if not game.check_down():
