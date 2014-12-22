@@ -172,24 +172,26 @@ class Tetris():
     '''all the logic for a tetris game
     '''
     def __init__(self, box, stdscr, remote):
-        self.playing = False
-        self.paused = False
-        self.remote = remote
+        self.playing        = False
+        self.paused         = False
+        self.remote         = remote
         # graphics
-        self.box = box
-        self.stdscr = stdscr
-        self.grid       = [[0 for _ in range(10)] for _ in range(20)]
-        self.colors     = [[8 for _ in range(10)] for _ in range(20)]
+        self.box            = box
+        self.stdscr         = stdscr
+        self.grid           = [[0 for _ in xrange(10)] for _ in xrange(20)]
+        self.colors         = [[8 for _ in xrange(10)] for _ in xrange(20)]
         # pieces
-        self.falling_piece = None
-        self.next_piece = Blocks.COLORS.keys()[random.randint(0,6)]
-        self.holding_piece = None
+        self.falling_piece  = None
+        self.holding_piece  = None
+        self.next_piece     = Blocks.COLORS.keys()[random.randint(0,6)]
         self.rot, self.fy, self.fx, self.sy = (0, 0, 0, 0)
         # lines to remove next tick
-        self.toremove = []
-        self.lines = 0
+        self.toremove       = []
+        self.lines          = 0
         # network stuff
-        self.lock = Lock()
+        self.garbage        = 0
+        self.kills          = 0
+        self.lock           = Lock()
 
     def ready(self, name):
         self.playing = True
@@ -203,10 +205,12 @@ class Tetris():
         self.rot = 0
         self.fy = -1
         self.fx = 5 - 2
-        if self.check_down():
-            self.fy += 1
-        else:
-            self.playing = False
+        # you hit the top, reset
+        if not self.check_down():
+            self.kills += 1
+            self.grid       = [[0 for _ in xrange(10)] for _ in xrange(20)]
+            self.colors     = [[8 for _ in xrange(10)] for _ in xrange(20)]
+        self.fy = 0
 
     def calc_shadow(self):
         '''calculates where the lookahead piece should go'''
@@ -221,11 +225,11 @@ class Tetris():
     def check_falling_set(self):
         '''creates a set of y,x tuples that you need to check for this piece'''
         return filter(lambda t: self.falling_piece[self.rot % 4][t[0]][t[1]] == 1, 
-                [(y, x) for x in range(4) for y in range(4)]) if self.falling_piece else []
+                [(y, x) for x in xrange(4) for y in xrange(4)]) if self.falling_piece else []
 
     def check_rot(self):
         '''checks all xy tuples, can't use falling set bc rot is different'''
-        for y, x in [(y, x) for x in range(4) for y in range(4)]:
+        for y, x in [(y, x) for x in xrange(4) for y in xrange(4)]:
             ay = self.fy + y
             ax = self.fx + x
             # not inside box OR collision
@@ -273,9 +277,9 @@ class Tetris():
                 0 <= ax < 10):
                 self.grid[ay][ax] = self.falling_piece[self.rot % 4][y][x]
                 self.colors[ay][ax] = Blocks.COLORS[self.falling_piece]
-        for y in range(20):
+        for y in xrange(20):
             line = True
-            for x in range(10):
+            for x in xrange(10):
                 if self.grid[y][x] == 0:
                     line = False
                     break
@@ -300,6 +304,17 @@ class Tetris():
             self.lines += 1
         self.toremove = []
 
+    def add_garbage(self):
+        for y in xrange(1, 20):
+            self.grid[y-1]      = self.grid[y]
+            self.colors[y-1]    = self.colors[y]
+        self.grid[-1]   = [1] * 10
+        self.colors[-1] = [1] * 10
+        self.grid[-1][random.randint(0, 9)] = 0
+        self.garbage += 1
+        
+
+
     # /////////////////////// DRAWING TO SCREEN  ////////////////////////////////
 
     def draw(self):
@@ -316,12 +331,14 @@ class Tetris():
         else: 
             self.stdscr.addstr(rely(0.5), relx(0.5) + 12 + self.remote*22,
                 "lines: %i" % self.lines, curses.color_pair(8))
+        self.stdscr.addstr(rely(0.5) + 1, relx(0.5) + 12 + self.remote*22,
+            "kills: %i" % self.kills, curses.color_pair(8))
         self.box.refresh()
 
     def draw_grid(self, box):
         box.box()
-        for y in range(20):
-            for x in range(10):
+        for y in xrange(20):
+            for x in xrange(10):
                 box.addstr(1 + y, 1 + x*2, '  ', 
                     curses.color_pair(self.colors[y][x] 
                                       if self.grid[y][x] == 1 else 8))
@@ -338,14 +355,14 @@ class Tetris():
 
     def draw_next_piece(self, stdscr):
         if self.next_piece:
-            for y, x in [(y, x) for x in range(4) for y in range(4)]:
+            for y, x in [(y, x) for x in xrange(4) for y in xrange(4)]:
                 stdscr.addstr(y + rely(0.5) - 10, x*2 + relx(0.5) + 12 + self.remote*22, '  ', 
                     curses.color_pair(Blocks.COLORS[self.next_piece] 
                                       if self.next_piece[0][y][x] == 1 else 8))
 
     def draw_holding_piece(self, stdscr):
         if self.holding_piece:
-            for y, x in [(y, x) for x in range(4) for y in range(4)]:
+            for y, x in [(y, x) for x in xrange(4) for y in xrange(4)]:
                 stdscr.addstr(y + rely(0.5) - 5, x*2 + relx(0.5) + 12 + self.remote*22, '  ', 
                     curses.color_pair(Blocks.COLORS[self.holding_piece] 
                                       if self.holding_piece[0][y][x] == 1 else 8))
@@ -500,6 +517,9 @@ def loop(stdscr, socket):
             with other.lock:
                 other.draw()
                 game.draw()
+                # add garbage when the other gets lines
+                for x in xrange(other.lines - game.garbage):
+                    game.add_garbage()
         else:
             game.draw()
 
@@ -539,7 +559,7 @@ def intro(stdscr):
     curses.curs_set(0)
     stdscr.border()
     x, y = relx(.5) - len(intro_str[0])/2, rely(.5) - len(intro_str)/2 - 6
-    for i in range(len(intro_str)):
+    for i in xrange(len(intro_str)):
         y += 1
         stdscr.addstr(y, x, intro_str[i], curses.color_pair(i % 8))
 
