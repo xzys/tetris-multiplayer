@@ -1,5 +1,5 @@
 #!/usr/bin/python
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 import curses
 import time
 import random
@@ -198,6 +198,11 @@ class Tetris():
         self.stdscr.addstr(rely(0.5) + 11, relx(0.5) + self.remote*22 - 3, 
             name, curses.color_pair(8))
 
+    def clear_grid(self):
+        self.grid           = [[0 for _ in xrange(10)] for _ in xrange(20)]
+        self.colors         = [[8 for _ in xrange(10)] for _ in xrange(20)]
+        self.fy = 0
+
     def new_piece(self):
         '''chooses a random new piece for the top'''
         self.falling_piece = self.next_piece
@@ -208,8 +213,7 @@ class Tetris():
         # you hit the top, reset
         if not self.check_down():
             self.kills += 1
-            self.grid       = [[0 for _ in xrange(10)] for _ in xrange(20)]
-            self.colors     = [[8 for _ in xrange(10)] for _ in xrange(20)]
+            self.clear_grid()
         self.fy = 0
 
         if self.kills > 2:
@@ -335,7 +339,7 @@ class Tetris():
             self.stdscr.addstr(rely(0.5), relx(0.5) + 12 + self.remote*22,
                 "lines: %i" % self.lines, curses.color_pair(8))
         self.stdscr.addstr(rely(0.5) + 1, relx(0.5) + 12 + self.remote*22,
-            "kills: %i" % self.kills, curses.color_pair(8))
+            "KO'd:  %i" % self.kills, curses.color_pair(8))
         self.box.refresh()
 
     def draw_grid(self, box):
@@ -388,6 +392,7 @@ class Tetris():
             fullcolors[10 * (self.fy + y) + (self.fx + x)] = str(Blocks.COLORS[self.falling_piece])
 
         return ':'.join((str(self.lines),
+                         str(self.kills),
                          str(Blocks.IDS.get(self.next_piece, "n")),
                          str(Blocks.IDS.get(self.holding_piece, "n")),
                          ''.join(fullgrid),
@@ -395,10 +400,11 @@ class Tetris():
 
     def deserialize(self, msg):
         self.lines          = int(msg[0]) if int(msg[0]) < 1000 else self.lines
-        self.next_piece     = None if msg[1] == 'n' else Blocks.REVIDS[int(msg[1])]
-        self.holding_piece  = None if msg[2] == 'n' else Blocks.REVIDS[int(msg[2])]
-        self.grid           = [[int(msg[3][y*10 + x]) for x in xrange(10)] for y in xrange(20)]
-        self.colors         = [[int(msg[4][y*10 + x]) for x in xrange(10)] for y in xrange(20)]
+        self.kills          = int(msg[1]) if int(msg[1]) < 1000 else self.kills
+        self.next_piece     = None if msg[2] == 'n' else Blocks.REVIDS[int(msg[2])]
+        self.holding_piece  = None if msg[3] == 'n' else Blocks.REVIDS[int(msg[3])]
+        self.grid           = [[int(msg[4][y*10 + x]) for x in xrange(10)] for y in xrange(20)]
+        self.colors         = [[int(msg[5][y*10 + x]) for x in xrange(10)] for y in xrange(20)]
 
 
 
@@ -420,22 +426,36 @@ class NetworkConnection(Thread):
         self.game = game
         self.other = other
         self.socket = socket
+        self.stopped = Event()
 
     def run(self):
         # wait for start signal
         while 1:
+            if self.stopped.isSet():
+                break
+
             msg = self.socket.recv(500)
             if msg.startswith("ready"):
                 with self.other.lock:
                     self.other.ready(msg.split('/')[0].split(':')[1])
+                # move to next loop
                 break
 
+            time.sleep(0.1)
+
         while 1:
+            if self.stopped.isSet():
+                break 
+
             msg = self.socket.recv(500)
             if msg.endswith("stop"):
                 with self.game.lock:
                     self.game.playing = False
-                    break
+                with self.other.lock:
+                    self.other.playing = False
+                break
+
+
 
             # update game with data
             with self.other.lock:
@@ -468,7 +488,7 @@ def loop(stdscr, socket):
         game = Tetris(box, stdscr, -1)
         box2 = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11 + 22)
         other = Tetris(box2, stdscr, 1)
-        thread = NetworkConnection(other, socket)
+        thread = NetworkConnection(game, other, socket)
         thread.daemon = True
         thread.start()
     else:
@@ -477,105 +497,127 @@ def loop(stdscr, socket):
         game = Tetris(box, stdscr, 0)
             
         
-    ready = False
+    state = 0
     while 1:
-        with game.lock:
-            # wait until other person is ready as well
-            if not ready:
-                if socket:
-                    key = stdscr.getch()
-                    if key == ord(' '):
-                        socket.send("ready:%s/" % name)
-                        game.ready(name)
-                    
-                    with other.lock:
-                        game.draw()
-                        other.draw()
-                        if game.playing and other.playing:
-                            ready = True
-                else:
-                    # go right ahead
-                    ready = True
-                    game.ready(name)
-                # if ready was set here, one time action
-                if ready:
-                    game.new_piece()
-                    last_update = time.time()            
+        # with game.lock:
+        # wait until other person is ready as well
+        time.sleep(0.02)
+        if state == 0:
 
-            if game.playing:
-                dirty = False
-                drop = False
-                fast = False
-                wait = 0.2
-                
+            if socket:
                 key = stdscr.getch()
-                if key == ord('q'):
-                    return
-                elif key == ord('p'):
-                    if game.paused:
-                        game.paused = False
-                    else:
-                        game.paused = True
-
-                if not game.paused:
-                    if key == ord('c'):
-                        game.hold_piece()
-                    elif key == ord(' '):
-                        game.fy = game.sy
-                        dirty = True
-                        drop = True
-                    elif key == curses.KEY_DOWN:
-                        fast = True
-                    elif key == curses.KEY_LEFT and game.check_side(-1):
-                        game.fx -= 1
-                        dirty = True
-                    elif key == curses.KEY_RIGHT and game.check_side(1): 
-                        game.fx += 1
-                        dirty = True
-                    elif key == curses.KEY_UP and game.check_rot(): 
-                        game.rot += 1
-                        dirty = True
-
-                    if drop or time.time() - last_update > (0.05 if fast else wait):
-                        last_update = time.time()
-                        game.remove_lines()
-                        if not game.check_down():
-                            game.commit_piece()
-                            game.new_piece()
-                        game.fy += 1
-                        dirty = True
-
-                    if dirty: game.calc_shadow()
-
-                if socket:
-                    if dirty:
-                        socket.send(game.serialize())
-                    with other.lock:
-                        other.draw()
-                        game.draw()
-                        # add garbage when the other gets lines
-                        for x in xrange(other.lines - game.garbage):
-                            game.add_garbage()
-                else:
+                if key == ord(' '):
+                    socket.send("ready:%s/" % name)
+                    game.ready(name)
+                
+                with other.lock:
                     game.draw()
-
-                time.sleep(0.02)
-            # ending sequence game not playing
+                    other.draw()
+                    if game.playing and other.playing:
+                        state = 1
             else:
-                ready = False
-                if socket:
-                    try:
-                        socket.send('stop')
-                    except:
-                        # this is okay, just means we received a signal to stop
-                        # and we are just now exiting the game loop
-                        # the important thing is that we are stopped
-                        # OR we could set a flag that we WERE stopped and not
-                        # send this
-                        pass
+                # go right ahead
+                key = stdscr.getch()
+                if key == ord(' '):
+                    state = 1
+                    game.ready(name)
+                game.draw()
+            # if ready was set here, one time action
+            if state == 1:
+                with other.lock:
+                    game.kills = 0
+                    other.kills = 0
+                game.new_piece()
+                last_update = time.time()            
 
-                    thread.stop()
-                    thread.start()
+
+        if state == 1:
+            dirty = False
+            drop = False
+            fast = False
+            wait = 0.2
+            
+            key = stdscr.getch()
+            if key == ord('q'):
+                return
+            elif key == ord('p'):
+                if game.paused:
+                    game.paused = False
+                else:
+                    game.paused = True
+
+            if not game.paused:
+                if key == ord('c'):
+                    game.hold_piece()
+                elif key == ord(' '):
+                    game.fy = game.sy
+                    dirty = True
+                    drop = True
+                elif key == curses.KEY_DOWN:
+                    fast = True
+                elif key == curses.KEY_LEFT and game.check_side(-1):
+                    game.fx -= 1
+                    dirty = True
+                elif key == curses.KEY_RIGHT and game.check_side(1): 
+                    game.fx += 1
+                    dirty = True
+                elif key == curses.KEY_UP and game.check_rot(): 
+                    game.rot += 1
+                    dirty = True
+
+                if drop or time.time() - last_update > (0.05 if fast else wait):
+                    last_update = time.time()
+                    game.remove_lines()
+                    if not game.check_down():
+                        game.commit_piece()
+                        game.new_piece()
+                    game.fy += 1
+                    dirty = True
+
+                if dirty: game.calc_shadow()
+
+            if socket:
+                if dirty:
+                    socket.send(game.serialize())
+                with other.lock:
+                    other.draw()
+                    game.draw()
+                    # add garbage when the other gets lines
+                    for x in xrange(other.lines - game.garbage):
+                        game.add_garbage()
+            else:
+                game.draw()
+
+            if not game.playing:
+                state = 2
+
+        # ending sequence game not playing
+        if state == 2:
+            state = 0
+            game.playing = False
+            game.clear_grid()
+
+            other.playing = False
+            other.clear_grid()
+            
+            if socket:
+                try:
+                    socket.send('stop')
+                except:
+                    # this is okay, just means we received a signal to stop
+                    # and we are just now exiting the game loop
+                    # the important thing is that we are stopped
+                    # OR we could set a flag that we WERE stopped and not
+                    # send this
+                    print 'EXIT'
+
+                thread.stopped.set()
+                thread.join()
+                # restart this thread
+                thread = NetworkConnection(game, other, socket)
+                thread.daemon = True
+                thread.start()
+
 
 
 
