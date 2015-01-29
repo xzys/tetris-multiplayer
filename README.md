@@ -11,7 +11,7 @@ a single/multiplayer tetris game that runs on your terminal (Mac/Linux). [A more
 
 ### Requirements
 
-1. python
+1. python2 (python 3 won't work)
 2. curses (Mac/*nix b/c windows doesn't have this unfortunately)
 
 ### Play
