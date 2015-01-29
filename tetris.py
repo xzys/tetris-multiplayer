@@ -481,8 +481,8 @@ class NetworkConnection(Thread):
     
 def loop(stdscr, socket):
     stdscr.nodelay(1)
-    
     other = None
+    
     if socket:
         box = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11 - 22)
         game = Tetris(box, stdscr, -1)
@@ -495,7 +495,6 @@ def loop(stdscr, socket):
         # normal single player
         box = curses.newwin(22, 22, rely(0.5) - 11, relx(0.5) - 11)
         game = Tetris(box, stdscr, 0)
-            
         
     state = 0
     while 1:
@@ -503,7 +502,6 @@ def loop(stdscr, socket):
         # wait until other person is ready as well
         time.sleep(0.02)
         if state == 0:
-
             if socket:
                 key = stdscr.getch()
                 if key == ord(' '):
@@ -524,9 +522,10 @@ def loop(stdscr, socket):
                 game.draw()
             # if ready was set here, one time action
             if state == 1:
-                with other.lock:
-                    game.kills = 0
-                    other.kills = 0
+                game.kills = 0
+                if socket:
+                    with other.lock:
+                        other.kills = 0
                 game.new_piece()
                 last_update = time.time()            
 
