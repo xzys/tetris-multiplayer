@@ -180,9 +180,6 @@ class Tetris():
         self.stdscr         = stdscr
         self.grid           = [[0 for _ in xrange(10)] for _ in xrange(20)]
         self.colors         = [[8 for _ in xrange(10)] for _ in xrange(20)]
-
-        self.grid_dirty     = True
-
         # pieces
         self.falling_piece  = None
         self.holding_piece  = None
@@ -195,8 +192,6 @@ class Tetris():
         self.garbage        = 0
         self.kills          = 0
         self.lock           = Lock()
-
-
 
     def ready(self, name):
         self.playing = True
@@ -221,10 +216,6 @@ class Tetris():
             self.clear_grid()
         self.fy = 0
 
-        self._shadow = []
-        self._falling_set = []
-        self.calc_dirty()
-
         if self.kills > 2:
             self.playing = False
 
@@ -235,26 +226,13 @@ class Tetris():
             self.fy += 1
         self.sy = self.fy
         self.fy = old_fy
-        
-        new_shadow = [(t[0] + self.sy, t[1] + self.fx) for t in self.check_falling_set()]
-        for y, x in (set(self._shadow) - set(new_shadow)):
-            self.box.addstr(1 + y, 1 + x*2, '  ', 8)
-        self._shadow = new_shadow
-
-    def calc_dirty(self):
-        new_falling_set = [(t[0] + self.fy, t[1] + self.fx) for t in self.check_falling_set()]
-        for y, x in (set(self._falling_set) - set(new_falling_set)):
-            self.box.addstr(1 + y, 1 + x*2, '  ', 8)
-        self._falling_set = new_falling_set
-        self.calc_shadow()
 
     # /////////////////////// CHECK OPERATIONS  ////////////////////////////////
     
     def check_falling_set(self):
         '''creates a set of y,x tuples that you need to check for this piece'''
-        return [] if not self.falling_piece else [(y, x) for x in xrange(4) for y in xrange(4) if self.falling_piece[self.rot % 4][y][x] == 1]
-        # return filter(lambda t: , 
-        #         [(y, x) for x in xrange(4) for y in xrange(4)]) if self.falling_piece else []
+        return filter(lambda t: self.falling_piece[self.rot % 4][t[0]][t[1]] == 1, 
+                [(y, x) for x in xrange(4) for y in xrange(4)]) if self.falling_piece else []
 
     def check_rot(self):
         '''checks all xy tuples, can't use falling set bc rot is different'''
@@ -315,8 +293,6 @@ class Tetris():
             if line:
                 self.toremove.append(y)
                 self.colors[y] = [1] * 10
-        self.grid_dirty = True
-
     def hold_piece(self):
         if self.holding_piece:
             self.holding_piece, self.falling_piece = self.falling_piece, self.holding_piece
@@ -334,7 +310,6 @@ class Tetris():
             self.grid.insert(0, [0] * 10)
             self.lines += 1
         self.toremove = []
-        self.grid_dirty = True
 
     def add_garbage(self):
         for y in xrange(1, 20):
@@ -344,35 +319,28 @@ class Tetris():
         self.colors[-1] = [1] * 10
         self.grid[-1][random.randint(0, 9)] = 0
         self.garbage += 1
+        
+
 
     # /////////////////////// DRAWING TO SCREEN  ////////////////////////////////
 
     def draw(self, iters=None):
         '''draw all grid, falling piece, and shadow'''
-        if self.grid_dirty:
-          self.draw_grid(self.box)
-          self.grid_dirty = False
-
-
-        if not self.playing:
-          self.box.addstr(11, 7, "WAITING", curses.color_pair(8))
-
-        if self.playing and self.remote != 1:
-          self.draw_shadow(self.box)
-
+        self.draw_grid(self.box)
+        if not self.playing: self.box.addstr(11, 7, "WAITING", curses.color_pair(8))
+        if self.playing and self.remote != 1: self.draw_shadow(self.box)
         self.draw_falling_piece(self.box)
         self.draw_next_piece(self.stdscr)
         self.draw_holding_piece(self.stdscr)
-
         if self.paused:
             self.stdscr.addstr(rely(0.5), relx(0.5) + 12 + self.remote*22,
                     "paused", curses.color_pair(8))
         else: 
             self.stdscr.addstr(rely(0.5), relx(0.5) + 12 + self.remote*22,
                 "lines: %i" % self.lines, curses.color_pair(8))
-
         self.stdscr.addstr(rely(0.5) + 1, relx(0.5) + 12 + self.remote*22,
             "KO'd:  %i" % self.kills, curses.color_pair(8))
+
         if iters:
           self.stdscr.addstr(rely(0.5) + 2, relx(0.5) + 12 + self.remote*22,
               ("iters:  %i" % iters).ljust(10), curses.color_pair(8))
@@ -388,7 +356,9 @@ class Tetris():
 
     def draw_falling_piece(self, box):
         if self.falling_piece:
-            for ay, ax in self._falling_set:
+            for y, x in self.check_falling_set():
+                ay = self.fy + y
+                ax = self.fx + x
                 if (0 <= ay < 20 and
                     0 <= ax < 10):
                     box.addstr(1 + ay, 1 + ax*2, '  ', 
@@ -409,12 +379,12 @@ class Tetris():
                                       if self.holding_piece[0][y][x] == 1 else 8))
 
     def draw_shadow(self, box):
-        if self.falling_piece is None:
-          return
-        for sy, sx in self._shadow:
-            # if (0 <= ay < 20 and
-            #     0 <= ax < 10):
-            box.addstr(1 + sy, 1 + sx*2, '[]', curses.color_pair(8))
+        for y, x in self.check_falling_set():
+            ay = self.sy + y
+            ax = self.fx + x
+            if (0 <= ay < 20 and
+                0 <= ax < 10):
+                box.addstr(1 + ay, 1 + ax*2, '[]', curses.color_pair(8))
 
     # /////////////////////// NETWORKING  ////////////////////////////////
 
@@ -537,7 +507,7 @@ def loop(stdscr, socket):
     while 1:
         # with game.lock:
         # wait until other person is ready as well
-        time.sleep(0.02)
+        # time.sleep(0.02)
 
         if state == 0:
             if socket:
@@ -558,7 +528,6 @@ def loop(stdscr, socket):
                     state = 1
                     game.ready(name)
                 game.draw()
-
             # if ready was set here, one time action
             if state == 1:
                 game.kills = 0
@@ -611,23 +580,21 @@ def loop(stdscr, socket):
                         game.new_piece()
                     game.fy += 1
                     dirty = True
-
+                    
                     last_iters = iters
                     iters = 0
 
-                if dirty:
-                  game.calc_dirty()
+                if dirty: game.calc_shadow()
 
             if socket:
-                pass
-                # if dirty:
-                #     socket.send(game.serialize())
-                # with other.lock:
-                #     other.draw()
-                #     game.draw()
-                #     # add garbage when the other gets lines
-                #     for x in xrange(other.lines - game.garbage):
-                #         game.add_garbage()
+                if dirty:
+                    socket.send(game.serialize())
+                with other.lock:
+                    other.draw()
+                    game.draw()
+                    # add garbage when the other gets lines
+                    for x in xrange(other.lines - game.garbage):
+                        game.add_garbage()
             else:
                 iters += 1
                 game.draw(last_iters)
