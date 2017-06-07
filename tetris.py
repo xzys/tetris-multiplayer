@@ -1,6 +1,7 @@
 #!/usr/bin/python
 from threading import Thread, Lock, Event
 import curses
+import curses.textpad
 import time
 import random
 import sys
@@ -537,7 +538,7 @@ def loop(stdscr, socket):
     while 1:
         # with game.lock:
         # wait until other person is ready as well
-        time.sleep(0.02)
+        # time.sleep(0.02)
 
         if state == 0:
             if socket:
@@ -573,7 +574,7 @@ def loop(stdscr, socket):
             dirty = False
             drop = False
             fast = False
-            wait = 0.2
+            wait = 0.1
             
             key = stdscr.getch()
             if key == ord('q'):
@@ -592,7 +593,8 @@ def loop(stdscr, socket):
                     dirty = True
                     drop = True
                 elif key == curses.KEY_DOWN:
-                    fast = True
+                    game.rot += 1
+                    dirty = True
                 elif key == curses.KEY_LEFT and game.check_side(-1):
                     game.fx -= 1
                     dirty = True
@@ -695,9 +697,17 @@ def intro(stdscr):
     curses.curs_set(0)
     stdscr.border()
     x, y = relx(.5) - len(intro_str[0])/2, rely(.5) - len(intro_str)/2 - 6
+    m = [1]*14 + [2]*13 + [3]*10 + [4]*13 + [5]*11 + [7]*16
     for i in xrange(len(intro_str)):
         y += 1
-        stdscr.addstr(y, x, intro_str[i], curses.color_pair(i % 8))
+        for j in xrange(len(intro_str[i])):
+          c = curses.color_pair(m[j+1] if i>5 and i<8 else m[j])
+          stdscr.addstr(y, x + j, intro_str[i][j], c)
+    
+
+    win = curses.newwin(5, 5, 5, 5)
+    tb = curses.textpad.Textbox(win, insert_mode=True)
+    # text = tb.edit()
 
     stdscr.getch()
     stdscr.refresh()
